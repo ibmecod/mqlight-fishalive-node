@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2014 IBM Corporation and other Contributors.
+ * Copyright (c) 2014, 2016 IBM Corporation and other Contributors.
  *
  * All rights reserved. This program and the accompanying materials
  * are made available under the terms of the Eclipse Public License v1.0
@@ -19,12 +19,16 @@ var SUBSCRIBE_TOPIC = 'mqlight/sample/wordsuppercase'
 var mqlightServiceName = 'mqlight'
 var messageHubServiceName = 'messagehub';
 
-var http = require('http')
-var express = require('express')
+var express = require('express');
+var cfenv = require('cfenv');
 var fs = require('fs')
 var mqlight = require('mqlight')
 var bodyParser = require('body-parser')
 var uuid = require('node-uuid')
+
+var app = express();
+app.use(express.static(__dirname + '/web'));
+var appEnv = cfenv.getAppEnv();
 
 /*
  * Establish MQ credentials
@@ -52,27 +56,17 @@ if (process.env.VCAP_SERVICES) {
       !opts.hasOwnProperty('password')) {
     throw 'Error - Check that app is bound to service';
   }
+} else if (process.env.mqlight_lookup_url &&
+           process.env.mqlight_user &&
+           process.env.mqlight_password) {
+  opts.service = process.env.mqlight_lookup_url;
+  opts.user = process.env.mqlight_user;
+  opts.password = process.env.mqlight_password;
 } else {
   var fishaliveHost = process.env.FISHALIVE_HOST || 'localhost'
   opts.service = 'amqp://' + fishaliveHost + ':5672'
 }
 opts.id = 'NODE_FRONTEND_' + uuid.v4().substring(0, 7)
-
-/*
- * Establish HTTP credentials, then configure Express
- */
-var httpOpts = {}
-if (process.env.PORT) { // CF Diego
-  httpOpts.port = process.env.PORT;
-}
-else if (process.env.VCAP_APP_PORT) { // CF DEA
-  httpOpts.port = process.env.VCAP_APP_PORT;
-}
-else { // running local
-  httpOpts.port = 3000;
-}
-
-var app = express()
 
 /*
  * Create our MQ Light client
@@ -121,28 +115,6 @@ function processMessage (data, delivery) {
   }
   heldMessages.push({'data': data, 'delivery': delivery})
 }
-
-/*
- * Add static HTTP content handling
- */
-function staticContentHandler (req, res) {
-  var url = 'web/' + req.url.substr(1)
-  if (url === 'web/') { url = __dirname + '/web/index.html' }
-  if (url === 'web/style.css') { res.contentType('text/css') }
-  fs.readFile(url,
-    function (err, data) {
-      if (err) {
-        res.writeHead(404)
-        return res.end('Not found')
-      }
-      res.writeHead(200)
-      return res.end(data)
-    })
-}
-app.all('/', staticContentHandler)
-app.all('/*.html', staticContentHandler)
-app.all('/*.css', staticContentHandler)
-app.all('/images/*', staticContentHandler)
 
 /*
  * Use JSON for our REST payloads
@@ -201,15 +173,6 @@ app.get('/rest/wordsuppercase', function (req, res) {
   }
 })
 
-/*
- * Start our REST server
- */
-if (httpOpts.host) {
-  http.createServer(app).listen(httpOpts.host, httpOpts.port, function () {
-    console.log('App listening on ' + httpOpts.host + ':' + httpOpts.port)
-  })
-} else {
-  http.createServer(app).listen(httpOpts.port, function () {
-    console.log('App listening on *:' + httpOpts.port)
-  })
-}
+app.listen(appEnv.port, '0.0.0.0', function() {
+    console.log('server starting on ' + appEnv.url);
+});
